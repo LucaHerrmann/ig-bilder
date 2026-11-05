@@ -88,19 +88,19 @@
 
 <script>
 const STANDARD = `Hi, liebe Beamtenberater-Community!
-Ihr kennt mich ja schon aus ein paar Reels – ich bin Luca, euer Finanzierungsspezialist.
-Heute ein kleines Update zu den Bauzinsen.
+Ihr kennt mich ja schon aus ein paar Reels – ich bin Luca, euer Finanzierungsspezialist, und ich hab heute ein kleines Update zu den Bauzinsen für euch.
 
-Die EZB hat den Leitzins bei 2,5 Prozent gelassen.
-Und die Bauzinsen?
-Sind seit Wochen erstaunlich ruhig – zehn Jahre fest liegen heute bei 4,34 Prozent.
+Die EZB hat den Leitzins diese Woche bei 2,5 Prozent gelassen.
+Für die Baufinanzierung heißt das erst mal: nicht viel.
 
-Die meisten Banken erwarten, dass das erstmal so bleibt.
-Heißt: Wer auf deutlich niedrigere Zinsen wartet, wettet – und verliert dabei Zeit.
+Die Bauzinsen sind schon seit ein paar Wochen ziemlich ruhig, für zehn Jahre fest liegen sie gerade bei 4,34 Prozent.
+Und die meisten Banken gehen davon aus, dass das in den nächsten Wochen auch so bleibt.
 
-Du hast ein Objekt im Blick oder deine Anschlussfinanzierung steht an?
-Schreib mir „ZINS“ – ich rechne dir aus, was für dich drin ist.
-Kostenlos und unverbindlich.`;
+Ehrlich gesagt ist das eine ganz angenehme Lage: Man muss sich nicht hetzen lassen und kann in Ruhe planen.
+Auf deutlich niedrigere Zinsen zu warten, bringt dagegen wahrscheinlich wenig.
+
+Wenn ihr also gerade ein Objekt im Blick habt oder eure Anschlussfinanzierung bald ansteht, schreibt mir einfach eine Nachricht.
+Dann schauen wir uns zusammen an, was bei euch möglich ist – ganz entspannt und unverbindlich.`;
 
 const $ = id => document.getElementById(id);
 const prompter = $("prompter"), text = $("text");
@@ -110,7 +110,7 @@ let laeuft = false, pos = 0, letzte = null, start = 0, uhr = null, wach = null;
 function lies(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }
 function merke(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
-text.textContent = lies("tp-text", STANDARD);
+text.textContent = lies("tp-text-2", STANDARD);
 $("tempo").value = lies("tp-tempo", 40);
 $("groesse").value = lies("tp-groesse", 32);
 function stil() {
@@ -274,7 +274,7 @@ $("verwerfen").onclick = () => { $("ergebnis").style.display = "none"; $("vorsch
 /* Text bearbeiten */
 $("textknopf").onclick = () => { if (rekorder) return; scrollen(false); $("feld").value = text.textContent; $("textblatt").style.display = "flex"; };
 $("standard").onclick = () => { $("feld").value = STANDARD; };
-$("fertig").onclick = () => { text.textContent = $("feld").value; merke("tp-text", $("feld").value); $("textblatt").style.display = "none"; anfang(); };
+$("fertig").onclick = () => { text.textContent = $("feld").value; merke("tp-text-2", $("feld").value); $("textblatt").style.display = "none"; anfang(); };
 </script>
 </body>
 </html>
