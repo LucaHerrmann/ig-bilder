@@ -53,6 +53,7 @@
     <label class="regler">Tempo <input id="tempo" type="range" min="10" max="120" value="40"></label>
     <label class="regler">Schrift <input id="groesse" type="range" min="20" max="56" value="32"></label>
   </div>
+  <div class="zeile"><button id="ansicht">Ganz</button></div>
   <div class="zeile">
     <button id="textknopf">Text</button>
     <button id="ueben">Üben</button>
@@ -112,16 +113,36 @@ $("tempo").oninput = stil; $("groesse").oninput = stil; stil();
 async function kamera() {
   try {
     strom = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 1080 }, height: { ideal: 1920 } },
+      /* Keine feste Aufloesung: Bei 1080x1920 schneidet der Browser das Sensorbild
+         zurecht ("crop-and-scale") - das wirkt stark gezoomt. resizeMode "none"
+         nimmt das unbeschnittene Sensorbild. */
+      video: { facingMode: "user", resizeMode: "none" },
       audio: { echoCancellation: true, noiseSuppression: true }
     });
     $("kamera").srcObject = strom;
+    const spur = strom.getVideoTracks()[0];
+    try {   // falls das Geraet digital zoomt: auf den kleinsten Wert stellen
+      const z = spur.getCapabilities?.().zoom;
+      if (z) await spur.applyConstraints({ advanced: [{ zoom: z.min }] });
+    } catch {}
+    $("kamera").onloadedmetadata = bildinfo;
   } catch (e) {
     const f = $("fehler"); f.style.display = "flex";
     f.textContent = "Kamera oder Mikrofon nicht freigegeben. Bitte in den Browser-Einstellungen für diese Seite erlauben und neu laden.";
   }
 }
 kamera();
+
+/* Ansicht: "Füllen" schneidet die Vorschau auf Bildschirmgröße zu, "Ganz" zeigt das
+   komplette Kamerabild mit Rand. Betrifft nur die Vorschau, nicht die Aufnahme. */
+let ganz = lies("tp-ganz", "1") === "1";
+function bildinfo() {
+  const v = $("kamera");
+  v.style.objectFit = ganz ? "contain" : "cover";
+  $("ansicht").textContent = (ganz ? "Ganz" : "Füllen") + (v.videoWidth ? ` ${v.videoWidth}×${v.videoHeight}` : "");
+}
+$("ansicht").onclick = () => { ganz = !ganz; merke("tp-ganz", ganz ? "1" : "0"); bildinfo(); };
+bildinfo();
 
 /* Scrollen */
 function schritt(t) {
