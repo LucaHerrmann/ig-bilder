@@ -14,7 +14,11 @@
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { margin:0; height:100%; background:#000; color:#fff; overflow:hidden;
                font-family:-apple-system, system-ui, sans-serif; }
-  video#kamera { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  /* Das Video ist nur Quelle; sichtbar ist die Zeichenflaeche - und genau die wird
+     aufgenommen. Vorschau = Aufnahme, auch bei Spiegelung und Weichzeichner.
+     (Nicht display:none: iOS haelt ein unsichtbares Video sonst an.) */
+  video#kamera { position:fixed; left:0; top:0; width:2px; height:2px; opacity:0; pointer-events:none; }
+  canvas#bild { position:fixed; inset:0; width:100%; height:100%; object-fit:contain; }
   #prompter { position:fixed; left:0; right:0; top:0; height:42vh; overflow:hidden;
               padding-top:env(safe-area-inset-top, 0px);
               background:linear-gradient(#000d 75%, #0000);
@@ -45,6 +49,7 @@
 </head>
 <body>
 <video id="kamera" autoplay playsinline muted></video>
+<canvas id="bild"></canvas>
 <div id="prompter"><div id="text"></div></div>
 <div id="zaehler"></div>
 
@@ -53,7 +58,11 @@
     <label class="regler">Tempo <input id="tempo" type="range" min="10" max="120" value="40"></label>
     <label class="regler">Schrift <input id="groesse" type="range" min="20" max="56" value="32"></label>
   </div>
-  <div class="zeile"><button id="ansicht">Ganz</button></div>
+  <div class="zeile">
+    <label class="regler">Weich <input id="weich" type="range" min="0" max="100" value="40"></label>
+    <button id="spiegel">Spiegeln: aus</button>
+    <button id="ansicht">Ganz</button>
+  </div>
   <div class="zeile">
     <button id="textknopf">Text</button>
     <button id="ueben">Üben</button>
@@ -138,7 +147,7 @@ kamera();
 let ganz = lies("tp-ganz", "1") === "1";
 function bildinfo() {
   const v = $("kamera");
-  v.style.objectFit = ganz ? "contain" : "cover";
+  $("bild").style.objectFit = ganz ? "contain" : "cover";
   $("ansicht").textContent = (ganz ? "Ganz" : "Füllen") + (v.videoWidth ? ` ${v.videoWidth}×${v.videoHeight}` : "");
 }
 $("ansicht").onclick = () => { ganz = !ganz; merke("tp-ganz", ganz ? "1" : "0"); bildinfo(); };
@@ -163,6 +172,50 @@ $("ueben").onclick = () => {
   else { anfang(); scrollen(true); $("ueben").textContent = "Stopp"; }
 };
 
+/* Bild aufbereiten: Spiegelung und Weichzeichner werden ins Bild gerechnet.
+   Weichzeichner = Bild stark verkleinert und wieder vergroessert (wirkt wie Unschaerfe,
+   laeuft auf jedem Handy-Browser) und halbtransparent ueber das scharfe Bild gelegt.
+   Augen und Konturen bleiben erkennbar, Hautunebenheiten und Schatten werden weicher.
+   Dazu eine leichte, warme Aufhellung. */
+const bild = $("bild"), ctx = bild.getContext("2d");
+const klein = document.createElement("canvas"), kctx = klein.getContext("2d");
+let gespiegelt = lies("tp-spiegel", "0") === "1";
+$("weich").value = lies("tp-weich", 40);
+$("weich").oninput = () => merke("tp-weich", $("weich").value);
+function spiegeltext() { $("spiegel").textContent = "Spiegeln: " + (gespiegelt ? "an" : "aus"); }
+$("spiegel").onclick = () => { gespiegelt = !gespiegelt; merke("tp-spiegel", gespiegelt ? "1" : "0"); spiegeltext(); };
+spiegeltext();
+
+function zeichne() {
+  const v = $("kamera"), b = v.videoWidth, h = v.videoHeight;
+  if (b && h) {
+    if (bild.width !== b || bild.height !== h) { bild.width = b; bild.height = h; bildinfo(); }
+    const w = Number($("weich").value) / 100;
+    ctx.save();
+    if (gespiegelt) { ctx.translate(b, 0); ctx.scale(-1, 1); }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(v, 0, 0, b, h);
+    if (w > 0) {
+      klein.width = Math.max(16, Math.round(b / 14)); klein.height = Math.max(16, Math.round(h / 14));
+      kctx.imageSmoothingQuality = "high";
+      kctx.drawImage(v, 0, 0, klein.width, klein.height);
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+      ctx.globalAlpha = 0.55 * w;
+      ctx.drawImage(klein, 0, 0, b, h);
+    }
+    ctx.restore();
+    if (w > 0) {
+      ctx.globalCompositeOperation = "screen";
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = `rgba(255, 236, 220, ${0.10 * w})`;
+      ctx.fillRect(0, 0, b, h);
+      ctx.globalCompositeOperation = "source-over";
+    }
+  }
+  requestAnimationFrame(zeichne);
+}
+requestAnimationFrame(zeichne);
+
 /* Aufnahme */
 function format() {
   for (const t of ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm"])
@@ -181,7 +234,8 @@ async function aufnehmen() {
   await countdown();
   const typ = format();
   stuecke = [];
-  rekorder = new MediaRecorder(strom, typ ? { mimeType: typ, videoBitsPerSecond: 8000000 } : undefined);
+  const aufnahmestrom = new MediaStream([...bild.captureStream(30).getVideoTracks(), ...strom.getAudioTracks()]);
+  rekorder = new MediaRecorder(aufnahmestrom, typ ? { mimeType: typ, videoBitsPerSecond: 8000000 } : undefined);
   rekorder.ondataavailable = e => e.data.size && stuecke.push(e.data);
   rekorder.onstop = fertig;
   rekorder.start(1000);
