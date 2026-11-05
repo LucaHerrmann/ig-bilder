@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<title>Teleprompter</title>
+<style>
+  /* Selbstaufnahme mit Teleprompter fuers Handy.
+     Frontkamera als Hintergrund, Text laeuft im oberen Drittel - also direkt unter
+     der Linse, der Blick bleibt fast in der Kamera. Das Video enthaelt nur das
+     Kamerabild, nicht den Text. Nichts wird hochgeladen: Aufnahme bleibt auf dem
+     Geraet, der Text liegt nur im Browser (localStorage). */
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; background:#000; color:#fff; overflow:hidden;
+               font-family:-apple-system, system-ui, sans-serif; }
+  video#kamera { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  #prompter { position:fixed; left:0; right:0; top:0; height:42vh; overflow:hidden;
+              padding-top:env(safe-area-inset-top, 0px);
+              background:linear-gradient(#000d 75%, #0000);
+              -webkit-mask-image:linear-gradient(#000 80%, #0000); mask-image:linear-gradient(#000 80%, #0000); }
+  #text { padding:4vh 6vw 40vh; font-weight:700; line-height:1.35; white-space:pre-wrap; }
+  #steuer { position:fixed; left:0; right:0; bottom:0; padding:12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+            background:linear-gradient(#0000, #000c 35%); display:flex; flex-direction:column; gap:10px; }
+  .zeile { display:flex; gap:10px; align-items:center; justify-content:space-between; }
+  .regler { display:flex; align-items:center; gap:8px; font-size:13px; flex:1; }
+  .regler input { flex:1; }
+  button { border:0; border-radius:999px; font-size:15px; font-weight:600; padding:10px 16px; color:#fff; background:#ffffff26; }
+  #aufnahme { width:72px; height:72px; border-radius:50%; background:#fff; padding:0; position:relative; }
+  #aufnahme::after { content:""; position:absolute; inset:8px; border-radius:50%; background:#e11d2a; transition:all .2s; }
+  #aufnahme.an::after { inset:22px; border-radius:6px; }
+  #zaehler { position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+             font-size:30vw; font-weight:800; text-shadow:0 0 30px #000; pointer-events:none; }
+  #zeit { font-variant-numeric:tabular-nums; font-size:15px; min-width:58px; }
+  #zeit.an { color:#ff5a5f; }
+  .blatt { position:fixed; inset:0; background:#000e; display:none; flex-direction:column; gap:12px;
+           padding:calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px)); z-index:5; }
+  .blatt textarea { flex:1; font-size:17px; padding:12px; border-radius:10px; border:0; }
+  .blatt video { flex:1; min-height:0; width:100%; background:#111; border-radius:10px; }
+  .blatt p { margin:0; font-size:14px; opacity:.8; }
+  #fehler { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:24px;
+            text-align:center; font-size:17px; line-height:1.5; }
+  .haupt { background:#2563eb; }
+</style>
+</head>
+<body>
+<video id="kamera" autoplay playsinline muted></video>
+<div id="prompter"><div id="text"></div></div>
+<div id="zaehler"></div>
+
+<div id="steuer">
+  <div class="zeile">
+    <label class="regler">Tempo <input id="tempo" type="range" min="10" max="120" value="40"></label>
+    <label class="regler">Schrift <input id="groesse" type="range" min="20" max="56" value="32"></label>
+  </div>
+  <div class="zeile">
+    <button id="textknopf">Text</button>
+    <button id="ueben">Üben</button>
+    <button id="aufnahme" aria-label="Aufnahme"></button>
+    <span id="zeit">0:00</span>
+    <button id="anfang">⟲</button>
+  </div>
+</div>
+
+<div class="blatt" id="textblatt">
+  <p>Text einfügen. Absätze mit Leerzeile trennen. Wird nur auf diesem Handy gespeichert.</p>
+  <textarea id="feld"></textarea>
+  <div class="zeile"><button id="standard">Beispieltext</button><button class="haupt" id="fertig">Übernehmen</button></div>
+</div>
+
+<div class="blatt" id="ergebnis">
+  <video id="vorschau" controls playsinline></video>
+  <p id="hinweis"></p>
+  <div class="zeile"><button id="verwerfen">Verwerfen</button><button class="haupt" id="sichern">Speichern</button></div>
+</div>
+
+<div id="fehler"></div>
+
+<script>
+const STANDARD = `Hi, liebe Beamtenberater-Community!
+Ihr kennt mich ja schon aus ein paar Reels – ich bin Luca, euer Finanzierungsspezialist.
+Heute ein kleines Update zu den Bauzinsen.
+
+Die EZB hat den Leitzins bei 2,5 Prozent gelassen.
+Und die Bauzinsen?
+Sind seit Wochen erstaunlich ruhig – zehn Jahre fest liegen heute bei 4,34 Prozent.
+
+Die meisten Banken erwarten, dass das erstmal so bleibt.
+Heißt: Wer auf deutlich niedrigere Zinsen wartet, wettet – und verliert dabei Zeit.
+
+Du hast ein Objekt im Blick oder deine Anschlussfinanzierung steht an?
+Schreib mir „ZINS“ – ich rechne dir aus, was für dich drin ist.
+Kostenlos und unverbindlich.`;
+
+const $ = id => document.getElementById(id);
+const prompter = $("prompter"), text = $("text");
+let strom = null, rekorder = null, stuecke = [], datei = null;
+let laeuft = false, pos = 0, letzte = null, start = 0, uhr = null, wach = null;
+
+function lies(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }
+function merke(k, v) { try { localStorage.setItem(k, v); } catch {} }
+
+text.textContent = lies("tp-text", STANDARD);
+$("tempo").value = lies("tp-tempo", 40);
+$("groesse").value = lies("tp-groesse", 32);
+function stil() {
+  text.style.fontSize = $("groesse").value + "px";
+  merke("tp-tempo", $("tempo").value); merke("tp-groesse", $("groesse").value);
+}
+$("tempo").oninput = stil; $("groesse").oninput = stil; stil();
+
+async function kamera() {
+  try {
+    strom = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1080 }, height: { ideal: 1920 } },
+      audio: { echoCancellation: true, noiseSuppression: true }
+    });
+    $("kamera").srcObject = strom;
+  } catch (e) {
+    const f = $("fehler"); f.style.display = "flex";
+    f.textContent = "Kamera oder Mikrofon nicht freigegeben. Bitte in den Browser-Einstellungen für diese Seite erlauben und neu laden.";
+  }
+}
+kamera();
+
+/* Scrollen */
+function schritt(t) {
+  if (!laeuft) return;
+  if (letzte !== null) {
+    pos = Math.min(pos + (t - letzte) / 1000 * Number($("tempo").value), text.scrollHeight - prompter.clientHeight);
+    prompter.scrollTop = pos;
+  }
+  letzte = t; requestAnimationFrame(schritt);
+}
+function scrollen(an) { laeuft = an; letzte = null; if (an) requestAnimationFrame(schritt); }
+function anfang() { pos = 0; prompter.scrollTop = 0; }
+prompter.onclick = () => { if (laeuft || rekorder) scrollen(!laeuft); };   // Tippen auf den Text = Pause
+$("anfang").onclick = () => { anfang(); };
+$("ueben").onclick = () => {
+  if (rekorder) return;
+  if (laeuft) { scrollen(false); $("ueben").textContent = "Üben"; }
+  else { anfang(); scrollen(true); $("ueben").textContent = "Stopp"; }
+};
+
+/* Aufnahme */
+function format() {
+  for (const t of ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm"])
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  return "";
+}
+async function countdown() {
+  const z = $("zaehler"); z.style.display = "flex";
+  for (const n of [3, 2, 1]) { z.textContent = n; await new Promise(r => setTimeout(r, 800)); }
+  z.style.display = "none";
+}
+async function aufnehmen() {
+  if (!strom) return;
+  if (rekorder) { rekorder.stop(); return; }
+  scrollen(false); anfang(); $("ueben").textContent = "Üben";
+  await countdown();
+  const typ = format();
+  stuecke = [];
+  rekorder = new MediaRecorder(strom, typ ? { mimeType: typ, videoBitsPerSecond: 8000000 } : undefined);
+  rekorder.ondataavailable = e => e.data.size && stuecke.push(e.data);
+  rekorder.onstop = fertig;
+  rekorder.start(1000);
+  $("aufnahme").classList.add("an"); $("zeit").classList.add("an");
+  start = Date.now();
+  uhr = setInterval(() => { const s = Math.floor((Date.now() - start) / 1000); $("zeit").textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }, 250);
+  try { wach = await navigator.wakeLock?.request("screen"); } catch {}
+  scrollen(true);
+}
+function fertig() {
+  clearInterval(uhr); scrollen(false);
+  $("aufnahme").classList.remove("an"); $("zeit").classList.remove("an");
+  try { wach?.release(); } catch {}
+  const typ = rekorder.mimeType || "video/mp4";
+  rekorder = null;
+  const endung = typ.includes("mp4") ? "mp4" : "webm";
+  const stempel = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  datei = new File(stuecke, `aufnahme-${stempel}.${endung}`, { type: typ.split(";")[0] });
+  $("vorschau").src = URL.createObjectURL(datei);
+  $("hinweis").textContent = navigator.canShare?.({ files: [datei] })
+    ? "„Speichern“ öffnet das Teilen-Menü – dort „Video sichern“ bzw. „In Fotos speichern“ wählen."
+    : "„Speichern“ lädt das Video herunter.";
+  $("ergebnis").style.display = "flex";
+}
+$("aufnahme").onclick = aufnehmen;
+
+$("sichern").onclick = async () => {
+  if (navigator.canShare?.({ files: [datei] })) {
+    try { await navigator.share({ files: [datei] }); return; } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = $("vorschau").src; a.download = datei.name; document.body.appendChild(a); a.click(); a.remove();
+};
+$("verwerfen").onclick = () => { $("ergebnis").style.display = "none"; $("vorschau").removeAttribute("src"); datei = null; anfang(); };
+
+/* Text bearbeiten */
+$("textknopf").onclick = () => { if (rekorder) return; scrollen(false); $("feld").value = text.textContent; $("textblatt").style.display = "flex"; };
+$("standard").onclick = () => { $("feld").value = STANDARD; };
+$("fertig").onclick = () => { text.textContent = $("feld").value; merke("tp-text", $("feld").value); $("textblatt").style.display = "none"; anfang(); };
+</script>
+</body>
+</html>
